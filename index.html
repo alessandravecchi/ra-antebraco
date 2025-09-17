@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
     <title>RA no Antebraço</title>
 
-    <!-- A-Frame e MindAR (CDNs) -->
+    <!-- A-Frame + MindAR (CDNs) -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
@@ -14,10 +14,12 @@
       .ui { position:fixed; left:0; right:0; bottom:16px; display:flex; gap:12px; justify-content:center; z-index:5 }
       .btn { border:0; padding:10px 14px; border-radius:12px; background:#ffffffcc; font-weight:700 }
       .hint { position:fixed; top:10px; left:0; right:0; text-align:center; color:#fff; font-family:system-ui, sans-serif; z-index:5; }
+      .toast { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#111c; color:#fff; padding:10px 14px; border-radius:10px; font-family:system-ui; z-index:10; display:none }
     </style>
   </head>
   <body>
     <div class="hint">Aponte a câmera para a pulseira (marcador ao lado do QR)</div>
+    <div id="toast" class="toast"></div>
 
     <div class="ui">
       <button class="btn" id="btnPlay">▶️ Reproduzir</button>
@@ -26,6 +28,7 @@
     </div>
 
     <a-scene
+      id="scene"
       mindar-image="imageTargetSrc: ./assets/targets.mind; maxTrack: 1"
       vr-mode-ui="enabled: false"
       device-orientation-permission-ui="enabled: false"
@@ -34,42 +37,114 @@
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
       <a-assets timeout="60000">
-        <video id="clip" src="./assets/clipe.mp4" preload="auto" loop playsinline webkit-playsinline muted crossorigin="anonymous"></video>
+        <video id="clip"
+          src="./assets/clipe.mp4"
+          preload="auto"
+          loop
+          playsinline
+          webkit-playsinline
+          muted
+          crossorigin="anonymous"></video>
       </a-assets>
 
-      <!-- Alvo da pulseira (index 0) -->
+      <!-- Target (index 0). Ajuste width/height/position conforme o braço -->
       <a-entity id="anchor" mindar-image-target="targetIndex: 0">
-        <!-- “Tela” do vídeo alinhada ao antebraço -->
         <a-plane
           id="videoPlane"
-          position="0 0.15 0"        <!-- ~15 cm adiante da pulseira -->
+          position="0 0.15 0"        <!-- ~15 cm ao longo do antebraço -->
           rotation="-90 0 0"          <!-- paralelo à pele -->
-          width="0.18" height="0.10125"  <!-- 16:9; ajuste o tamanho físico -->
-          material="shader: flat; src: #clip; transparent: true"
-        ></a-plane>
+          width="0.18" height="0.10125"  <!-- 16:9; ajuste tamanho físico -->
+          material="shader: flat; src: #clip; transparent: true">
+        </a-plane>
       </a-entity>
     </a-scene>
 
     <script>
-      const video = document.getElementById('clip');
-      const btnPlay = document.getElementById('btnPlay');
-      const btnMute = document.getElementById('btnMute');
-      const btnPause = document.getElementById('btnPause');
+      const $ = (s)=>document.querySelector(s);
+      const video   = $('#clip');
+      const btnPlay = $('#btnPlay');
+      const btnMute = $('#btnMute');
+      const btnPause= $('#btnPause');
+      const scene   = $('#scene');
+      const toastEl = $('#toast');
 
+      let userInteracted = false;
+
+      function toast(msg, t=2200){
+        toastEl.textContent = msg;
+        toastEl.style.display = 'block';
+        setTimeout(()=>toastEl.style.display='none', t);
+      }
+
+      // Autoplay silencioso (necessário para Android/iOS)
       document.addEventListener('DOMContentLoaded', async () => {
-        try { await video.play(); } catch(e) { /* iOS exige gesto p/ áudio */ }
+        try {
+          video.muted = true;
+          await video.play();  // tenta tocar em silêncio
+          video.pause();
+          video.currentTime = 0;
+          console.log('[video] autoplay silencioso ok');
+        } catch (e) {
+          console.warn('[video] autoplay bloqueado', e);
+        }
+
+        // Teste simples: arquivos estão acessíveis?
+        fetch('./assets/targets.mind')
+          .then(r => { if(!r.ok) throw new Error('targets.mind não encontrado'); })
+          .catch(e => { console.error(e); toast('Erro: targets.mind ausente em /assets'); });
+        fetch('./assets/clipe.mp4')
+          .then(r => { if(!r.ok) throw new Error('clipe.mp4 não encontrado'); })
+          .catch(e => { console.error(e); toast('Erro: clipe.mp4 ausente em /assets'); });
       });
 
-      btnPlay.addEventListener('click', async () => { try { await video.play(); } catch(e){} });
+      // Gesture para desbloquear áudio (iOS exige)
+      const unlockAudio = async () => {
+        userInteracted = true;
+        try {
+          video.muted = true;
+          await video.play().catch(()=>{});
+          video.pause();
+          video.currentTime = 0;
+          video.muted = false;
+          await video.play();
+          btnMute.textContent = '🔊 Mutar';
+          console.log('[video] play com áudio após gesto');
+        } catch (e) {
+          console.warn('[video] user-gesture falhou', e);
+          toast('Toque novamente em ▶️/Desmutar para liberar o áudio');
+        }
+      };
+
+      btnPlay.addEventListener('click', unlockAudio);
       btnPause.addEventListener('click', () => video.pause());
       btnMute.addEventListener('click', () => {
         video.muted = !video.muted;
         btnMute.textContent = video.muted ? '🔇 Desmutar' : '🔊 Mutar';
       });
 
-      const sceneEl = document.querySelector('a-scene');
-      sceneEl.addEventListener('targetFound', () => { video.play().catch(()=>{}); });
-      // sceneEl.addEventListener('targetLost',  () => { video.pause(); }); // descomente se quiser pausar ao perder o marcador
+      // Eventos do AR (diagnóstico)
+      scene.addEventListener('arReady', () => console.log('[AR] ready'));
+      scene.addEventListener('arError', (e) => {
+        console.error('[AR] error', e);
+        toast('Erro ao iniciar AR. Verifique permissão da câmera e HTTPS.');
+      });
+      scene.addEventListener('targetFound', async () => {
+        try {
+          if (!userInteracted) video.muted = true; // sem gesto → mudo
+          await video.play();
+          console.log('[AR] targetFound → play');
+        } catch (e) {
+          console.warn('[AR] targetFound play falhou', e);
+          toast('Toque em ▶️ e em Desmutar para tocar o vídeo');
+        }
+      });
+      scene.addEventListener('targetLost', () => {
+        // Se quiser pausar quando perder o marcador, descomente:
+        // video.pause();
+      });
+
+      // Dica: se não ver nada, troque temporariamente:
+      // document.getElementById('videoPlane').setAttribute('material', 'color: #00ffcc');
     </script>
   </body>
 </html>
