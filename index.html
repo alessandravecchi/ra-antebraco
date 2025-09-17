@@ -14,12 +14,14 @@
       .ui { position:fixed; left:0; right:0; bottom:16px; display:flex; gap:12px; justify-content:center; z-index:5 }
       .btn { border:0; padding:10px 14px; border-radius:12px; background:#ffffffcc; font-weight:700 }
       .hint { position:fixed; top:10px; left:0; right:0; text-align:center; color:#fff; font-family:system-ui, sans-serif; z-index:5; }
-      .toast { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#111c; color:#fff; padding:10px 14px; border-radius:10px; font-family:system-ui; z-index:10; display:none }
+      .toast { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#111c; color:#fff; padding:10px 14px; border-radius:10px; font-family:system-ui; z-index:10; display:none; text-align:center; }
+      .compat { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:#000; color:#fff; font:600 16px system-ui; z-index:20; padding:24px; text-align:center; }
     </style>
   </head>
   <body>
     <div class="hint">Aponte a câmera para a pulseira (marcador ao lado do QR)</div>
     <div id="toast" class="toast"></div>
+    <div id="compat" class="compat"></div>
 
     <div class="ui">
       <button class="btn" id="btnPlay">▶️ Reproduzir</button>
@@ -37,8 +39,9 @@
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
       <a-assets timeout="60000">
+        <!-- TROQUE para seu arquivo final. Use nome novo p/ “quebrar” cache -->
         <video id="clip"
-          src="./assets/clipe.mp4"
+          src="./assets/clipe-v2.mp4?v=1"
           preload="auto"
           loop
           playsinline
@@ -47,13 +50,13 @@
           crossorigin="anonymous"></video>
       </a-assets>
 
-      <!-- Target (index 0). Ajuste width/height/position conforme o braço -->
+      <!-- Target (index 0). Ajuste width/height/position/rotation conforme seu braço -->
       <a-entity id="anchor" mindar-image-target="targetIndex: 0">
         <a-plane
           id="videoPlane"
-          position="0 0.15 0"        <!-- ~15 cm ao longo do antebraço -->
-          rotation="-90 0 0"          <!-- paralelo à pele -->
-          width="0.18" height="0.10125"  <!-- 16:9; ajuste tamanho físico -->
+          position="0 0.18 0"         <!-- ~18 cm adiante da pulseira; teste 0.10–0.24 -->
+          rotation="-90 0 0"           <!-- paralelo à pele; se não aparecer, teste 90 0 0 -->
+          width="0.22" height="0.12375"<!-- 16:9; ~22 cm x 12,4 cm -->
           material="shader: flat; src: #clip; transparent: true">
         </a-plane>
       </a-entity>
@@ -67,20 +70,34 @@
       const btnPause= $('#btnPause');
       const scene   = $('#scene');
       const toastEl = $('#toast');
+      const compatEl= $('#compat');
 
       let userInteracted = false;
 
-      function toast(msg, t=2200){
+      function toast(msg, t=2400){
         toastEl.textContent = msg;
         toastEl.style.display = 'block';
         setTimeout(()=>toastEl.style.display='none', t);
       }
 
-      // Autoplay silencioso (necessário para Android/iOS)
+      // 0) Compatibilidade mínima (getUserMedia + WebGL)
+      (async ()=>{
+        const webgl2 = !!document.createElement('canvas').getContext('webgl2');
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !webgl2) {
+          compatEl.style.display = 'flex';
+          compatEl.innerHTML = `
+            <div>
+              <div style="font-size:22px;margin-bottom:10px;">Falha ao iniciar 😕</div>
+              <div>Abra no <b>Chrome (Android)</b> ou <b>Safari (iOS)</b>, com câmera permitida.</div>
+            </div>`;
+        }
+      })();
+
+      // 1) Autoplay silencioso (Android/iOS)
       document.addEventListener('DOMContentLoaded', async () => {
         try {
           video.muted = true;
-          await video.play();  // tenta tocar em silêncio
+          await video.play();   // tenta tocar em silêncio
           video.pause();
           video.currentTime = 0;
           console.log('[video] autoplay silencioso ok');
@@ -88,19 +105,25 @@
           console.warn('[video] autoplay bloqueado', e);
         }
 
-        // Teste simples: arquivos estão acessíveis?
+        // checagem de arquivos
         fetch('./assets/targets.mind')
           .then(r => { if(!r.ok) throw new Error('targets.mind não encontrado'); })
           .catch(e => { console.error(e); toast('Erro: targets.mind ausente em /assets'); });
-        fetch('./assets/clipe.mp4')
-          .then(r => { if(!r.ok) throw new Error('clipe.mp4 não encontrado'); })
-          .catch(e => { console.error(e); toast('Erro: clipe.mp4 ausente em /assets'); });
+        fetch('./assets/clipe-v2.mp4?v=1', {cache:'no-store'})
+          .then(r => { if(!r.ok) throw new Error('clipe-v2.mp4 não encontrado'); })
+          .catch(e => { console.error(e); toast('Erro: clipe (mp4) ausente em /assets'); });
+
+        // checagem de permissão de câmera (útil p/ destravar loading infinito)
+        navigator.mediaDevices.getUserMedia({video:true})
+          .then(()=>console.log('[cam] ok'))
+          .catch(err=>{ console.error('[cam] bloqueada', err); toast('Permita a Câmera no navegador'); });
       });
 
-      // Gesture para desbloquear áudio (iOS exige)
+      // 2) Gesto para desbloquear áudio (iOS exige)
       const unlockAudio = async () => {
         userInteracted = true;
         try {
+          // “nudge” iOS: tocar mudo, pausar, voltar ao início, desmutar e tocar
           video.muted = true;
           await video.play().catch(()=>{});
           video.pause();
@@ -122,11 +145,11 @@
         btnMute.textContent = video.muted ? '🔇 Desmutar' : '🔊 Mutar';
       });
 
-      // Eventos do AR (diagnóstico)
+      // 3) Eventos do AR (diagnóstico)
       scene.addEventListener('arReady', () => console.log('[AR] ready'));
       scene.addEventListener('arError', (e) => {
         console.error('[AR] error', e);
-        toast('Erro ao iniciar AR. Verifique permissão da câmera e HTTPS.');
+        toast('Erro ao iniciar AR. Verifique permissão da câmera e use Chrome/Safari.');
       });
       scene.addEventListener('targetFound', async () => {
         try {
@@ -143,7 +166,7 @@
         // video.pause();
       });
 
-      // Dica: se não ver nada, troque temporariamente:
+      // DEBUG: se não ver nada, comente a linha de material acima e use:
       // document.getElementById('videoPlane').setAttribute('material', 'color: #00ffcc');
     </script>
   </body>
