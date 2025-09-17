@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
+    <title>RA no Antebraço</title>
+
+    <!-- A-Frame e MindAR (CDNs) -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      html, body { margin:0; height:100%; background:#000; overflow:hidden; }
+      .ui { position:fixed; left:0; right:0; bottom:16px; display:flex; gap:12px; justify-content:center; z-index:5 }
+      .btn { border:0; padding:10px 14px; border-radius:12px; background:#ffffffcc; font-weight:700 }
+      .hint { position:fixed; top:10px; left:0; right:0; text-align:center; color:#fff; font-family:system-ui, sans-serif; z-index:5; }
+    </style>
+  </head>
+  <body>
+    <div class="hint">Aponte a câmera para a pulseira (marcador ao lado do QR)</div>
+
+    <div class="ui">
+      <button class="btn" id="btnPlay">▶️ Reproduzir</button>
+      <button class="btn" id="btnMute">🔇 Desmutar</button>
+      <button class="btn" id="btnPause">⏸️ Pausar</button>
+    </div>
+
+    <a-scene
+      mindar-image="imageTargetSrc: ./assets/targets.mind; maxTrack: 1"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: false"
+      renderer="colorManagement: true; physicallyCorrectLights: true; antialias: true"
+    >
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <a-assets timeout="60000">
+        <video id="clip" src="./assets/clipe.mp4" preload="auto" loop playsinline webkit-playsinline muted crossorigin="anonymous"></video>
+      </a-assets>
+
+      <!-- Alvo da pulseira (index 0) -->
+      <a-entity id="anchor" mindar-image-target="targetIndex: 0">
+        <!-- “Tela” do vídeo alinhada ao antebraço -->
+        <a-plane
+          id="videoPlane"
+          position="0 0.15 0"        <!-- ~15 cm adiante da pulseira -->
+          rotation="-90 0 0"          <!-- paralelo à pele -->
+          width="0.18" height="0.10125"  <!-- 16:9; ajuste o tamanho físico -->
+          material="shader: flat; src: #clip; transparent: true"
+        ></a-plane>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const video = document.getElementById('clip');
+      const btnPlay = document.getElementById('btnPlay');
+      const btnMute = document.getElementById('btnMute');
+      const btnPause = document.getElementById('btnPause');
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        try { await video.play(); } catch(e) { /* iOS exige gesto p/ áudio */ }
+      });
+
+      btnPlay.addEventListener('click', async () => { try { await video.play(); } catch(e){} });
+      btnPause.addEventListener('click', () => video.pause());
+      btnMute.addEventListener('click', () => {
+        video.muted = !video.muted;
+        btnMute.textContent = video.muted ? '🔇 Desmutar' : '🔊 Mutar';
+      });
+
+      const sceneEl = document.querySelector('a-scene');
+      sceneEl.addEventListener('targetFound', () => { video.play().catch(()=>{}); });
+      // sceneEl.addEventListener('targetLost',  () => { video.pause(); }); // descomente se quiser pausar ao perder o marcador
+    </script>
+  </body>
+</html>
